@@ -463,7 +463,7 @@ def perform_inference(f, p, ff, pp, smoo, epic, plot=[], save=[]):
         plt.xscale('log')
         plt.show()
     if save:
-        plt.savefig('/home/jsk389/Dropbox/Python/K2-GAP/C1-results/'+str(epic)+'_est.png')
+        #plt.savefig('/home/jsk389/Dropbox/Python/K2-GAP/C1-results/'+str(epic)+'_est.png')
         #plt.show()
         plt.close()
         # Setup headers
@@ -477,7 +477,7 @@ def perform_inference(f, p, ff, pp, smoo, epic, plot=[], save=[]):
         values = np.vstack((best_params,errors)).reshape((-1,), order='F')
         values = np.append(values, (FLAG_OSC, pH1_OSC, FLAG_GRAN, pH1_GRAN, FLAG_WHITE, pH1_WHITE))
         outputs = np.vstack([labels, values])
-        np.savetxt('/home/jsk389/Dropbox/Python/K2-GAP/C1-results/'+str(epic)+'_diags.txt', outputs, fmt="%s")
+        #np.savetxt('/home/jsk389/Dropbox/Python/K2-GAP/C1-results/'+str(epic)+'_diags.txt', outputs, fmt="%s")
 
 def read_data(fname):
     """
