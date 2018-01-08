@@ -14,14 +14,6 @@ import itertools
 import multiprocessing
 import time
 
-
-def priors():
-    names = ['hsig1', 'b1', 'hsig2', 'b2', 'denv', 'Henv']
-    # Need to give it numax and priors parameter
-    #x = joblib.load('Priors/Priors/hsig1_priors.pkl')
-    pri = np.array([joblib.load('Priors/Priors/'+str(i)+'_priors.pkl') for i in names])
-    return pri
-
 def rebin(f, smoo):
     if smoo < 1.5:
         return f
@@ -30,8 +22,8 @@ def rebin(f, smoo):
     ff = np.median(f[:m*smoo].reshape((m,smoo)), axis=1)
     return ff
 
-def lorentzian(f, hsig, hfreq, hexp):
-    """Zero-centred Lorentzian function used to describe granulation.
+def lorentzian(f, hsig, hfreq):
+    """Zero-centred super-Lorentzian function used to describe granulation.
 
     Parameters
     ----------
@@ -45,18 +37,13 @@ def lorentzian(f, hsig, hfreq, hexp):
            Parameter describing the characterstic frequency of the Lorentzian
            function.
 
-    hexp: either float or [n_samples]
-           Parameter describing the width of the Gaussian envelope.
-           width = 2.0 * np.sqrt(2.0 * np.log(2.0)) * sigma, where sigma is
-           FWHM.
-
     Returns
     -------
     array of shape [n_samples, len(f)] or [len(f)]
     Shape of params dictates shape of returned model. This can either be
     n_samples models or just one model returned.
     """
-    return hsig / (1 + (f/hfreq)**hexp)
+    return hsig / (1 + (f/hfreq)**4)
 
 def gaussian(f, henv, numax, width):
     """ Gaussian function used to describe the oscillations.
@@ -111,37 +98,41 @@ def model_wo(f, params):
         Shape of params dictates shape of returned model. This can either be
         n_samples models or just one model returned.
     """
-    if len(params) > 13:
+    if len(params) > 10:
         # Granulation
-        m = np.asarray(models.lorentzian(f, params[:,0].ravel(),
-                                            params[:,1].ravel(),
-                                            params[:,2].ravel()))
+        new_f = np.append(f, f+f.max())
+        m = np.asarray(models.lorentzian(new_f, params[:,0].ravel(),
+                                            params[:,1].ravel()))
         # Granulation
-        m += np.asarray(models.lorentzian(f, params[:,3].ravel(),
-                                             params[:,4].ravel(),
-                                             params[:,5].ravel()))
+        m += np.asarray(models.lorentzian(new_f, params[:,2].ravel(),
+                                             params[:,3].ravel()))
         # Oscillations
         # "Activity"
-        m += np.asarray(models.lorentzian(f, params[:,9].ravel(),
-                                             params[:,10].ravel(),
-                                             params[:,11].ravel()))
+        m += np.asarray(models.lorentzian(new_f, params[:,7].ravel(),
+                                             params[:,8].ravel()))
         # Sampling effect
-        m *= np.sinc(f / 2.0 / 284.0)**2.0
+        m *= np.sinc(f / 2.0 / (284.0*2))**2.0
+
+        # Accounting for effect near Nyquist
+        m = m[:len(m)//2,:] + m[len(m)//2:,:][::-1]
         # White Noise
-        m += params[:,12]
+        m += params[:,9]
         return m
     else:
+        new_f = np.append(f, f+f.max())
         # Granulation
-        m = lorentzian(f, params[0], params[1], params[2])
+        m = lorentzian(new_f, params[0], params[1])
         # Granulation
-        m += lorentzian(f, params[3], params[4], params[5])
+        m += lorentzian(new_f, params[2], params[3])
         # Oscillations
         # "Activity"
-        m += lorentzian(f, params[9], params[10], params[11])
+        m += lorentzian(new_f, params[7], params[8])
         # Sampling effect
-        m *= np.sinc(f / 2.0 / 284.0)**2.0
+        m *= np.sinc(f / 2.0 / (284.0*2))**2.0
+        # Accounting for effect near Nyquist
+        m = m[:len(m)//2] + m[len(m)//2:][::-1]
         # White Noise
-        m += params[12]
+        m += params[9]
         return m
 
 #@profile
@@ -168,41 +159,49 @@ def model(f, params):
         Shape of params dictates shape of returned model. This can either be
         n_samples models or just one model returned.
     """
+    new_f = np.append(f, f+f.max())
 
-    if len(params) > 13:
+    if len(params) > 10:
         # Granulation
-        m = np.asarray(models.lorentzian(f, params[:,0].ravel(),
-                                            params[:,1].ravel(),
-                                            params[:,2].ravel()))
+        m = np.asarray(models.lorentzian(new_f, params[:,0].ravel(),
+                                            params[:,1].ravel()))
         # Granulation
-        m += np.asarray(models.lorentzian(f, params[:,3].ravel(),
+        m += np.asarray(models.lorentzian(new_f, params[:,2].ravel(),
+                                             params[:,3].ravel()))
+        # Oscillations
+        m += np.asarray(models.gaussian(new_f, params[:,6].ravel(),
                                              params[:,4].ravel(),
                                              params[:,5].ravel()))
-        # Oscillations
-        m += np.asarray(models.gaussian(f, params[:,8].ravel(),
-                                             params[:,6].ravel(),
-                                             params[:,7].ravel()))
         # "Activity"
-        m += np.asarray(models.lorentzian(f, params[:,9].ravel(),
-                                             params[:,10].ravel(),
-                                             params[:,11].ravel()))
+        m += np.asarray(models.lorentzian(new_f, params[:,7].ravel(),
+                                             params[:,8].ravel()))
         # Sampling effect
-        m *= np.sinc(f / 2.0 / 284.0)**2.0
+        mm = m[:,:][::-1] * np.sinc(new_f / 2.0 /(284.0))**2.0
+        m *= np.sinc(new_f / 2.0 /(284.0))**2.0
+
+        # Accounting for effect near Nyquist
+        m += mm
+        m = m[:len(m)//2,:]
+
         # White Noise
-        m += params[:,12]
+        m += params[:,9]
         return m
 
     else:
         # Granulation
-        m = lorentzian(f, params[0], params[1], params[2])
+        m = lorentzian(new_f, params[0], params[1])
         # Granulation
-        m += lorentzian(f, params[3], params[4], params[5])
+        m += lorentzian(new_f, params[2], params[3])
         # Oscillations
-        m += gaussian(f, params[8], params[6], params[7])
+        m += gaussian(new_f, params[6], params[4], params[5])
         # "Activity"
-        m += lorentzian(f, params[9], params[10], params[11])
+        m += lorentzian(fnew_, params[7], params[8])
         # Sampling effect
-        m *= np.sinc(f / 2.0 / 284.0)**2.0
+        mm = m[::-1] * np.sinc(new_f / 2.0 /(284.0))**2.0
+        m *= np.sinc(new_f / 2.0 / (284.0))**2.0
+        # Accounting for effect near Nyquist
+        m += mm
+        m = m[::len(m)//2]
         # White Noise
-        m += params[12]
+        m += params[9]
         return m

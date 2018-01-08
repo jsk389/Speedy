@@ -13,14 +13,9 @@ warnings.filterwarnings("ignore")
 import itertools
 import multiprocessing
 import time
+import scipy.misc as misc
 
-
-def priors():
-    names = ['hsig1', 'b1', 'hsig2', 'b2', 'denv', 'Henv']
-    # Need to give it numax and priors parameter
-    #x = joblib.load('Priors/Priors/hsig1_priors.pkl')
-    pri = np.array([joblib.load('Priors/Priors/'+str(i)+'_priors.pkl') for i in names])
-    return pri
+import numdifftools as ndt
 
 def rebin(f, smoo):
     if smoo < 1.5:
@@ -30,8 +25,8 @@ def rebin(f, smoo):
     ff = np.median(f[:m*smoo].reshape((m,smoo)), axis=1)
     return ff
 
-def lorentzian(f, hsig, hfreq, hexp):
-    return hsig / (1 + (f/hfreq)**hexp)
+def lorentzian(f, hsig, hfreq):
+    return hsig / (1 + (f/hfreq)**4)
 
 def gaussian(f, henv, numax, width):
     tmp = width / (2.0 * np.sqrt(2.0 * np.log(2)))
@@ -40,87 +35,81 @@ def gaussian(f, henv, numax, width):
 #@profile
 def model_wo(f, params):
 
-    if len(params) > 13:
+    if len(params) > 10:
         # Granulation
         m = np.asarray(models.lorentzian(f, params[:,0].ravel(),
-                                            params[:,1].ravel(),
-                                            params[:,2].ravel()))
+                                            params[:,1].ravel()))
         # Granulation
-        m += np.asarray(models.lorentzian(f, params[:,3].ravel(),
-                                             params[:,4].ravel(),
-                                             params[:,5].ravel()))
+        m += np.asarray(models.lorentzian(f, params[:,2].ravel(),
+                                             params[:,3].ravel()))
         # Oscillations
         # "Activity"
-        m += np.asarray(models.lorentzian(f, params[:,9].ravel(),
-                                             params[:,10].ravel(),
-                                             params[:,11].ravel()))
+        m += np.asarray(models.lorentzian(f, params[:,7].ravel(),
+                                             params[:,8].ravel()))
         # Sampling effect
         m *= np.sinc(f / 2.0 / 284.0)**2.0
         # White Noise
-        m += params[:,12]
+        m += params[:,9]
         return m
     else:
         # Granulation
-        m = lorentzian(f, params[0], params[1], params[2])
+        m = lorentzian(f, params[0], params[1])
         # Granulation
-        m += lorentzian(f, params[3], params[4], params[5])
+        m += lorentzian(f, params[2], params[3])
         # Oscillations
         # "Activity"
-        m += lorentzian(f, params[9], params[10], params[11])
+        m += lorentzian(f, params[7], params[8])
         # Sampling effect
         m *= np.sinc(f / 2.0 / 284.0)**2.0
         # White Noise
-        m += params[12]
+        m += params[9]
         return m
 
 #@profile
 def model(f, params):
 
-    if len(params) > 13:
+    if len(params) > 10:
         # Granulation
-        m = np.asarray(models.lorentzian(f, params[:,0].ravel(),
-                                            params[:,1].ravel(),
-                                            params[:,2].ravel()))
+        m = np.asarray(models.lorentzian(f, params[:,0][:,None],
+                                            params[:,1][:,None]))
         # Granulation
-        m += np.asarray(models.lorentzian(f, params[:,3].ravel(),
-                                             params[:,4].ravel(),
-                                             params[:,5].ravel()))
+        m += np.asarray(models.lorentzian(f, params[:,2][:,None],
+                                             params[:,3][:,None]))
         # Oscillations
-        m += np.asarray(models.gaussian(f, params[:,8].ravel(),
-                                             params[:,6].ravel(),
-                                             params[:,7].ravel()))
+        m += np.asarray(models.gaussian(f, params[:,6][:,None],
+                                             params[:,4][:,None],
+                                             params[:,5][:,None]))
         # "Activity"
-        m += np.asarray(models.lorentzian(f, params[:,9].ravel(),
-                                             params[:,10].ravel(),
-                                             params[:,11].ravel()))
+        m += np.asarray(models.lorentzian(f, params[:,7][:,None],
+                                             params[:,8][:,None]))
         # Sampling effect
         m *= np.sinc(f / 2.0 / 284.0)**2.0
         # White Noise
-        m += params[:,12]
+        m += params[:,9][:,None]
         return m
 
     else:
         # Granulation
-        m = lorentzian(f, params[0], params[1], params[2])
+        m = lorentzian(f, params[0], params[1])
         # Granulation
-        m += lorentzian(f, params[3], params[4], params[5])
+        m += lorentzian(f, params[2], params[3])
         # Oscillations
-        m += gaussian(f, params[8], params[6], params[7])
+        m += gaussian(f, params[6], params[4], params[5])
         # "Activity"
-        m += lorentzian(f, params[9], params[10], params[11])
+        m += lorentzian(f, params[7], params[8])
         # Sampling effect
         m *= np.sinc(f / 2.0 / 284.0)**2.0
         # White Noise
-        m += params[12]
+        m += params[9]
         return m
     """
 
     """
 
 
-def lnlike_wo(f, p, smoo, params, return_dict):
+def lnlike_wo(f, p, smoo, params):
 
-    if len(params) > 13:
+    if len(params) > 10:
         mod = model_wo(f, params.reshape((np.shape(params)[0], np.shape(params)[1],1)))
         #sinc = np.sinc(f / 2.0 / 284.0)**2.0
         #mod = models.model_wo(f, params, sinc)
@@ -130,10 +119,7 @@ def lnlike_wo(f, p, smoo, params, return_dict):
         #idx = (ll== ll.max())
         ind = np.argpartition(ll, -10)[-10:]
         best_params = params[ind,:]
-        try:
-            return_dict.send((ll[ind], best_params))
-        except:
-            pass
+
         #return_dict['wo'] = ll
         return (ll.max(), best_params)
     else:
@@ -157,35 +143,33 @@ def combo_like(*obj_main):
     return (ll1, ll2)
 
 #@profile
-def lnlike(f, p, smoo, params, return_dict):
-
-    if len(params) > 13:
-        mod = model(f, params.reshape((np.shape(params)[0], np.shape(params)[1],1)))
+def lnlike(params, f, p, smoo):
+    #print(len(params), np.shape(params))
+    if len(params) > 10:
+        mod = model(f, params.reshape((np.shape(params)[0], np.shape(params)[1])))
+        #print(np.shape(mod))
         #sinc = np.sinc(f / 2.0 / 284.0)**2.0
         #Y = np.zeros([len(params), len(f)])
         #mod = model(Y, f, params, sinc)
-        ll = -1.0 * np.sum(np.log(mod) + (p / mod), axis=1) * smoo
-        ll = ll[~np.isnan(ll)]
+        ll = np.sum(np.log(mod) + (p / mod), axis=1) * smoo
+        #ll = ll[~np.isnan(ll)]
         # Select parameters with max log-like and return those instead
         #idx = (ll == ll.max())
-        ind = np.argpartition(ll, -10)[-10:]
-        best_params = params[ind,:]
-        try:
-            return_dict.send((ll[ind], best_params))
-        except:
-            pass
+        ind = np.argpartition(ll, 100)[:100]
+        #ind = (ll == ll.min())
+        best_params = params[ind,:].squeeze()
         #return_dict['w'] = ll
-        return (ll.max(), best_params)
+        return ll, ind, best_params #(ll.max(), best_params)
     else:
         mod = model(f, params)
     #plt.plot(f, p, 'k')
     #plt.plot(f, mod, 'r')
     #plt.show()
-        ll = -1.0 * np.sum(np.log(mod) + (p / mod))
-        print(np.shape(mod), np.shape(ll))
+        ll = np.sum(np.log(mod) + (p / mod))
+        #print(np.shape(mod), np.shape(ll))
         if not np.isfinite(ll):
-            return -np.inf
-        return -1.0 * np.sum(np.log(mod) + (p / mod)) * smoo
+            return 1e30 #np.inf
+        return np.sum(np.log(mod) + (p / mod)) * smoo
 
 
 def lnpriors(priors, params):
@@ -227,15 +211,52 @@ def flatten(iter_lst):
 def perform_inference(f, p, ff, pp, smoo, epic, plot=[], save=[]):
 
     # first_point = []
-    n_bootstrap = 20
-    nsamps = 10000
-    params = np.zeros([n_bootstrap, 13])
-    white = np.mean(p[-100:])
+    n_bootstrap = 1
+    nsamps = int(1e5)
+    params = np.zeros([n_bootstrap, 10])
+    white = np.median(pp[-100:]) / 0.702 / 1.2
     print("WHITE: ", white)
-    proper_samples_full = np.exp(x.sample(nsamps*n_bootstrap))
-    proper_samples_full[:,-1] = white
-    proper_samples_full_wo = proper_samples_full.copy()
+    proper_samples_full, _ = x.sample(nsamps*n_bootstrap)
+    proper_samples_full = np.exp(proper_samples_full)
+
+    #for i in range(10):
+    #    plt.plot(proper_samples_full[:,4], proper_samples_full[:,i], '.')
+    #    plt.show()
+
+    #proper_samples_full = proper_samples_full[proper_samples_full[:,4] < 283.0]
+    proper_samples_full = np.c_[proper_samples_full,
+                                np.ones(len(proper_samples_full))*white]
+    #proper_samples_full_wo = proper_samples_full.copy()
     #proper_samples_full_wo[:,8] = 0
+
+    like, ind, best_params = lnlike(proper_samples_full, f, p, smoo)
+    plt.plot(proper_samples_full[:,4], like, '.')
+    plt.plot(proper_samples_full[ind,4], like[ind], 'r.')
+    plt.show()
+
+    #print(np.shape(np.median(best_params, axis=0)))
+
+    #Hfun = ndt.Hessian(lnlike)#, full_output=True)
+    Hfun = ndt.Hessdiag(lnlike)
+    hessian_ndt = Hfun(np.median(best_params, axis=0), f, p, smoo)
+    print(np.diag(hessian_ndt))
+    se = np.sqrt(np.diag(np.linalg.inv(np.diag(hessian_ndt))))
+    #print(best_params, axis=0)
+    print(se)
+    print("NUMAX: {} +/- {}".format(np.median(best_params, axis=0)[4],
+                                    se[4]))
+    print("SHAPE: ", np.shape(hessian_ndt))
+
+
+    plt.plot(ff, pp, 'k')
+    for i in range(np.shape(best_params)[0]):
+        plt.plot(ff, model(ff, best_params[i,:]), color='g', alpha=0.2, lw=2)
+    plt.plot(ff, model(ff, np.median(best_params, axis=0)), color='r', lw=2)
+    print(np.median(best_params, axis=0))
+    print(np.std(best_params, axis=0))
+    plt.show()
+    sys.exit()
+
 
     s = time.time()
 
@@ -500,10 +521,10 @@ def prepare_data(f, p):
     """
     ff = f.copy()
     pp = p.copy()
-    p = p[f > 5.0]
-    f = f[f > 5.0]
+    p = p[f > 2.0]
+    f = f[f > 2.0]
 
-    smoo = int(1.0 / (f[1]-f[0]))
+    smoo = int(0.5 / (f[1]-f[0]))
     p = rebin(p, smoo)
     f = rebin(f, smoo)
     return f, p, ff, pp, smoo
@@ -515,15 +536,28 @@ def extract_epic(fname):
 if __name__ == "__main__":
 
 
-    x = joblib.load('../../Reggae/complete_priors.pkl')
-    pri = []
+    x = joblib.load('../Extract-Priors/James_complete_priors.pkl')
     import time
 
     # Arrange samples into N x num_parameters array
-    f, p = np.loadtxt('/home/jsk389/Dropbox/KOI-3890/PDCspec8564976.pow', unpack=True)
-    p = p[:len(f)/2]
-    f = f[:len(f)/2]
-    p *= 1e6
+    f, p = np.loadtxt('../../../../KOI-3890/PDCspec8564976.pow', unpack=True)
+    f, p = np.loadtxt('../../../../KOI-3890/kplr006448890_kasoc-psd_llc_v3.pow', unpack=True)
+    f, p = np.loadtxt('../../../../KOI-3890/kplr010683647_kasoc-psd_llc_v1.pow.txt', unpack=True)
+    #f, p = np.loadtxt('../../../../KOI-3890/kplr006144777_kasoc-psd_llc_v1.pow.txt', unpack=True)
+    #f, p = np.loadtxt('../../../../KOI-3890/kplr008611114_kasoc-psd_llc_v1.pow.txt', unpack=True)
+    #p = p[:len(f)//2]
+    #f = f[:len(f)//2]
+    #p *= 1e6
+
+
+    # Prep data
+    f, p, ff, pp, smoo = prepare_data(f, p)
+
+    # Perform inference
+    perform_inference(f, p, ff, pp, smoo, 0, plot=True, save=True)
+    #sys.exit()
+
+    sys.exit()
 
     #fname = '/home/jsk389/Dropbox/Mike/PSD_for_analysis/ktwo215745876_kasoc-psd_llc_v1.pow'
     #f, p = np.loadtxt('/home/jsk389/Dropbox/Mike/PSD_for_analysis/ktwo215745876_kasoc-psd_llc_v1.pow', unpack=True)
@@ -533,10 +567,10 @@ if __name__ == "__main__":
     import glob
     #fname = '/home/jsk389/Dropbox/Python/Importance-Sampling/ktwo201652583_kasoc-psd_llc_v1.fits'
     #fname = 'ktwo201121245_kasoc-psd_llc_v1.fits'
-    fname = 'ktwo201126368_kasoc-psd_llc_v1.fits'
-    fname = 'ktwo201128834_kasoc-psd_llc_v1.fits'
-    fnames = glob.glob('/home/jsk389/Dropbox/Data/K2/C1-Stello/*.fits')#[55:]
-    fnames = ['/home/jsk389/Dropbox/Data/K2/C1-Stello/ktwo201127270_kasoc-psd_llc_v1.fits']
+    #fname = 'ktwo201126368_kasoc-psd_llc_v1.fits'
+    #fname = 'ktwo201128834_kasoc-psd_llc_v1.fits'
+    #fnames = glob.glob('/home/jsk389/Dropbox/Data/K2/C1-Stello/*.fits')#[55:]
+    #fnames = ['/home/jsk389/Dropbox/Data/K2/C1-Stello/ktwo201127270_kasoc-psd_llc_v1.fits']
     #fname = '/home/jsk389/Dropbox/Python/Importance-Sampling/ktwo201690230_kasoc-psd_llc_v1.fits'
 
     for idx, i in enumerate(fnames):
